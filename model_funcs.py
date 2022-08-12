@@ -9,6 +9,11 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from time import time
 
+import sys
+sys.path.append("/home/ci411/volume_estimation/")
+
+import eval_funcs
+
 from tqdm import tqdm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -36,76 +41,9 @@ def create_dataloader(feature_df, batch_size=1, log=True):
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
     return dataloader
 
-#metrics functions
-def MSE(output, target):
-    loss = torch.mean((output - target)**2)
-    return loss
-
-def Bias(output, target):
-    loss = torch.mean(output - target)
-    return loss
-
-def CovStep(output, target, output_mean, target_mean):
-    loss = torch.mean(((output - output_mean) * (target - target_mean)))
-    return loss
-
-def MeanAbsLogStep(output, target, log=True):
-    #convert out of log
-    if log:
-        vol_pred = 10**output
-        vol_target = 10**target
-    else:
-        vol_pred = output
-        vol_target = target
-    loss = torch.mean(torch.abs(torch.log(vol_pred/vol_target)))
-    return loss
-
-def compute_eval_metrics(dataloader, model, log=True):
-    target_sum = 0
-    pred_sum = 0
-    n_steps = 0
-    
-    for (x,y) in dataloader:        
-        (x, y) = (x.to(device), y.to(device))
-        pred = model(x)
-        target_sum += y.sum()
-        pred_sum += pred.sum()
-        n_steps += 1
-    
-    target_mean = target_sum/n_steps
-    pred_mean = pred_sum/n_steps
-    
-    mse = 0
-    mean_error = 0
-    cov = 0
-    abs_log_ratio = 0
-    
-    var_pred = 0 #technically var * N but gets cancelled out in Pearson calculation
-    var_target = 0 
-    
-    for (x,y) in dataloader:        
-        (x, y) = (x.to(device), y.to(device))
-        pred = model(x)
-        mse += MSE(pred, y)
-        mean_error += Bias(pred, y)
-        cov += CovStep(pred, y, pred_mean, target_mean)
-        abs_log_ratio += MeanAbsLogStep(pred, y, log=log)
-        
-        var_pred += MSE(pred, pred_mean)
-        var_target += MSE(y, target_mean)
-        
-        pears = CovStep(pred, y, pred_mean, target_mean)/(torch.sqrt(MSE(pred, pred_mean))*torch.sqrt(MSE(y, target_mean)))
-    
-    out_dict = {}
-    out_dict['mse'] = (mse / n_steps).item()
-    out_dict['bias'] = (mean_error / n_steps).item()
-    out_dict['pearson_cor'] = (cov/(torch.sqrt(var_pred) * torch.sqrt(var_target))).item()
-    out_dict['mean_mult'] = (torch.exp(abs_log_ratio/n_steps)).item()
-    
-    return out_dict
-
 #training loop
-def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3, overwrite=False, epochs=1000, log=True):
+def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3, overwrite=False,
+                epochs=1000, log=True, sched_thres=1e-4):
 
     model_path = model_dict['model_path']
     if not os.path.exists(model_path):
@@ -148,14 +86,15 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3
     
     model = model_func((input_height, input_width)).to(device)
     opt = Adam(model.parameters(),lr=lr_init, weight_decay=l2_reg)
-    scheduler = ReduceLROnPlateau(opt, 'min')
+    scheduler = ReduceLROnPlateau(opt, 'min', threshold=sched_thres)
     hist = {
         "duration": [],
         "train_loss": [],
         "val_loss": [],
         "val_bias": [],
         "val_pearson_cor": [],
-        "val_mean_mult": []
+        "val_mean_mult": [],
+        "val_var_ratio": []
     }
     
     lr = lr_init
@@ -172,7 +111,7 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3
         for (x, y) in train_dataloader:
             (x, y) = (x.to(device), y.to(device))
             pred = model(x)
-            loss = MSE(pred, y.reshape((y.shape[0], 1)))
+            loss = eval_funcs.MSE(pred, y.reshape((y.shape[0], 1)))
 
             opt.zero_grad()
             loss.backward()
@@ -184,7 +123,7 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3
         with torch.no_grad():
             model.eval()
 
-            val_metrics = compute_eval_metrics(val_dataloader, model, log=log)
+            val_metrics = eval_funcs.compute_eval_metrics(val_dataloader, model, log=log)
         
         
         #update LR scheduler
@@ -199,6 +138,7 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3
         hist['val_bias'].append(val_metrics['bias'])
         hist['val_pearson_cor'].append(val_metrics['pearson_cor'])
         hist['val_mean_mult'].append(val_metrics['mean_mult'])
+        hist['val_var_ratio'].append(val_metrics['var_ratio'])
 
         
         print("Epoch: {}\tDuration: {:.2f}s\tTrain loss: {:.4f}\tVal loss: {:.4f}\tVal bias:{:.4f}\tVal Pearson correlation: {:.4e}\tVal MeanMult: {:.4f}"\
@@ -212,7 +152,7 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-2, l2_reg=1e-3
             json.dump(hist, f)
             
     print("Training coplete, computing evaluation on test set")
-    test_metrics = compute_eval_metrics(dataloader, model, log=log)
+    test_metrics = eval_funcs.compute_eval_metrics(test_dataloader, model, log=log)
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
                 
