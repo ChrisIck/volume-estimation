@@ -194,10 +194,10 @@ class envelope_feat(_featurizer):
         return log_energy
 
 class gammatone_featurizer:
-    def __init__(self, input_len, feat_type, sr=16000, num_freq=20,
-                 window_s=64, hop_s=32, low_freq=50, high_freq=2000):
+    def __init__(self, input_len, feat_type, sr=16000, num_freq=20, window_s=64,\
+                 hop_s=32, low_freq=50, high_freq=2000, deriv_seq=None):
         
-        self.feat_type = feat_type #can be 'mag', 'phase', 'continuity', 'tonality'
+        self.feat_type = feat_type #can be 'mag', 'phase'
         self.input_len = input_len
         self.sr = sr
         self.num_freq = num_freq
@@ -205,7 +205,9 @@ class gammatone_featurizer:
         self.hop_s = hop_s
         self.low_freq = low_freq
         self.high_freq = high_freq
-        self.nfft  = int(2 ** (np.ceil(np.log2(2 * self.window_s))))
+        self.nfft = int(2 ** (np.ceil(np.log2(2 * self.window_s))))
+        self.deriv_seq = deriv_seq #list of derivatives 
+                                   #(along either bin axis [0] or time axis [1])
 
         self.out_shape = None
 
@@ -221,14 +223,13 @@ class gammatone_featurizer:
         sgram = gammatone.fftweight.specgram(wave, self.nfft, self.sr, self.window_s, self.hop_s)
         if self.feat_type == 'mag':
             result = weights.dot(np.abs(sgram))
-        else:     
+        elif self.feat_type == 'phase':     
             result = weights.dot(np.angle(sgram))
-        if self.feat_type == 'continuity' or self.feat_type == 'tonality':
-            result = np.gradient(result)[0]
-        if self.feat_type == 'tonality':
-            result = np.gradient(result)[0]
         
-            
+        if self.deriv_seq is not None:
+            for ax in self.deriv_seq:
+                result = np.gradient(result)[ax]
+             
         if self.out_shape is None:
             self.out_shape = result.shape
         

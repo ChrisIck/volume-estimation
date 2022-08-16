@@ -12,6 +12,7 @@ print('Using device:', device)
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib import cm 
 
 
 MODELS_DIR = '/scratch/ci411/sonos_rirs/models/'
@@ -90,7 +91,7 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100):
             continue
         
         for j, (key, vals) in enumerate(hist.items()):
-            axs[j].plot(vals, color=colors[i], label=model)
+            axs[j].plot(vals[offset:], color=colors[i], label=model)
             axs[j].set_title(key)
             seq_len = len(vals)
             if seq_len>axs_lengths[j]:
