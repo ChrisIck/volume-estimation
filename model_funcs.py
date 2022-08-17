@@ -73,6 +73,11 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3
     print("Creating test dataloader")
     test_dataloader = create_dataloader(test_df, log=log)
     
+    del feat_df
+    del train_df
+    del val_df
+    del test_df
+    
     features, labels = next(iter(train_dataloader))
     print(f"Feature batch shape: {features.size()}")
     print(f"Labels batch shape: {labels.size()}")
@@ -151,10 +156,22 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3
         with open(hist_path, 'w') as f:
             json.dump(hist, f)
             
-    print("Training coplete, computing evaluation on test set")
+    torch.cuda.empty_cache()
+    print("Training complete, computing evaluation on test set")
     test_metrics = eval_funcs.compute_eval_metrics(test_dataloader, model, log=log)
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
+    
+    
+    model_name = model_dict['model_path'].split('/')[-1]
+    experiment_name = model_dict['model_path'].split('/')[-2]
+    print("Generating confusion matrices...")
+    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=test_dataloader, log=log,\
+                                           verbose=False, savepath=os.path.join(model_dict['model_path'], 'test_cm.pdf'))
+    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=val_dataloader, log=log,\
+                                           verbose=False, savepath=os.path.join(model_dict['model_path'], 'val_cm.pdf'))
+    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=train_dataloader, log=log,\
+                                           verbose=False, savepath=os.path.join(model_dict['model_path'], 'train_cm.pdf'))
                 
 
 #model definitions

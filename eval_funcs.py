@@ -14,6 +14,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm 
 
+from tqdm import tqdm
+
 
 MODELS_DIR = '/scratch/ci411/sonos_rirs/models/'
 
@@ -64,7 +66,7 @@ def plot_experiment_metrics(experiment_name, model_names=None):
     plt.legend(loc='lower right')
     return fig
 
-def plot_experiment_curves(experiment_name, model_names=None, offset=100):
+def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='coolwarm'):
         
     experiment_dir = os.path.join(MODELS_DIR, experiment_name)
     
@@ -74,7 +76,7 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100):
             
     n = len(model_names)
     width = 0.5/n
-    cmap = cm.ScalarMappable(cmap='coolwarm')
+    cmap = cm.ScalarMappable(cmap=cmap)
     colors = cmap.to_rgba(np.arange(n))
     
     fig, axs = plt.subplots(7,1, figsize=(12,16))
@@ -87,31 +89,39 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100):
             with open(hist_json) as f:
                 hist = json.load(f)
         else:
-            print("No metric file at {}".format(hist_json))
+            print("No history file at {}".format(hist_json))
             continue
         
+        n_epochs = len(hist['duration'])
+        print("Model {} has completed {} epochs".format(model, n_epochs))
         for j, (key, vals) in enumerate(hist.items()):
-            axs[j].plot(vals[offset:], color=colors[i], label=model)
+            sub_vals = vals[offset:] #subset to plot
+            epochs = np.linspace(offset, len(vals)-1, len(sub_vals))
+            axs[j].plot(epochs, sub_vals, color=colors[i], label=model)
             axs[j].set_title(key)
-            seq_len = len(vals)
-            if seq_len>axs_lengths[j]:
-                axs_lengths[j] = seq_len
-                axs[j].set_xlim([offset, axs_lengths[j]])
+            #if seq_len>axs_lengths[j]:
+            #    axs_lengths[j] = seq_len
+    
+    max_len = 1000
+    for i in range(7):          
+        axs[i].set_xlim([offset, max_len])
             
     plt.legend()             
     return fig
     
-def generate_confusion_plot(experiment_name, model_name, split='test', savepath=None, bins=50, figside=8,\
+def generate_confusion_plot(experiment_name, model_name, dataloader=None, split='test', savepath=None, bins=50, figside=8,\
                             bounds=[1,5], log=False, verbose=True):
-    if verbose:
-        print("Loading model info {}/{}...".format(experiment_name,model_name))
     model_hist, model_spec, model_state = get_model_hist_spec_state(model_name, experiment_name)
-    feature_df = pd.read_csv(model_spec['data_path'])
     
-    if verbose:
-        print("Building {} dataloader from {}...".format(split, model_spec['data_path']))
-    dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']==split], log=log)
+    if dataloader is None:
+        if verbose:
+            print("Loading model info {}/{}...".format(experiment_name,model_name))
+        feature_df = pd.read_csv(model_spec['data_path'])
 
+        if verbose:
+            print("Building {} dataloader from {}...".format(split, model_spec['data_path']))
+        dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']==split], log=log)
+        
     features, labels = next(iter(dataloader))
     input_height = features.size()[2]
     input_width = features.size()[3]
@@ -183,7 +193,10 @@ def generate_confusion_plot(experiment_name, model_name, split='test', savepath=
 
     _ = axHistx.hist(truth_list, bins=bins, range=bounds)
     _ = axHisty.hist(pred_list, bins=bins, range=bounds, orientation='horizontal')
-    plt.show()
+    
+    
+    if savepath is not None:
+        plt.savefig(savepath)
     
     return fig
 
@@ -223,6 +236,8 @@ def compute_eval_metrics(dataloader, model, log=True):
         pred_sum += pred.sum()
         n_steps += 1
     
+    torch.cuda.empty_cache()
+
     target_mean = target_sum/n_steps
     pred_mean = pred_sum/n_steps
     
@@ -234,22 +249,22 @@ def compute_eval_metrics(dataloader, model, log=True):
     var_pred = 0 #technically var * N but gets cancelled out in Pearson calculation
     var_target = 0 
     
-    for (x,y) in dataloader:        
+    for (x,y) in tqdm(dataloader):        
         (x, y) = (x.to(device), y.to(device))
         pred = model(x)
-        mse += MSE(pred, y)
-        mean_error += Bias(pred, y)
-        cov += CovStep(pred, y, pred_mean, target_mean)
-        abs_log_ratio += MeanAbsLogStep(pred, y, log=log)
+        mse += MSE(pred, y).item()
+        mean_error += Bias(pred, y).item()
+        cov += CovStep(pred, y, pred_mean, target_mean).item()
+        abs_log_ratio += MeanAbsLogStep(pred, y, log=log).item()
         
-        var_pred += MSE(pred, pred_mean)
-        var_target += MSE(y, target_mean)    
-    
+        var_pred += MSE(pred, pred_mean).item()
+        var_target += MSE(y, target_mean).item()   
+        
     out_dict = {}
-    out_dict['mse'] = (mse / n_steps).item()
-    out_dict['bias'] = (mean_error / n_steps).item()
-    out_dict['pearson_cor'] = (cov/(torch.sqrt(var_pred) * torch.sqrt(var_target))).item()
-    out_dict['mean_mult'] = (torch.exp(abs_log_ratio/n_steps)).item()
-    out_dict['var_ratio'] = (torch.sqrt(var_pred) / torch.sqrt(var_target)).item()
+    out_dict['mse'] = (mse / n_steps)
+    out_dict['bias'] = (mean_error / n_steps)
+    out_dict['pearson_cor'] = (cov/(np.sqrt(var_pred) * np.sqrt(var_target)))
+    out_dict['mean_mult'] = (np.exp(abs_log_ratio/n_steps))
+    out_dict['var_ratio'] = (np.sqrt(var_pred) / np.sqrt(var_target))
     
     return out_dict
