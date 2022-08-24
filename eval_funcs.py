@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 
 MODELS_DIR = '/scratch/ci411/sonos_rirs/models/'
+FIG_PATH = '/home/ci411/volume_estimation/figures/'
 
 def get_model_hist_spec_state(model_name, experiment_name):
     hist_dir = os.path.join(MODELS_DIR, experiment_name, model_name, 'hist.json')
@@ -36,7 +37,7 @@ def get_model_hist_spec_state(model_name, experiment_name):
         
     return hist, spec, model_state
 
-def plot_experiment_metrics(experiment_name, model_names=None):
+def plot_experiment_metrics(experiment_name, model_names=None, split='test'):
     experiment_dir = os.path.join(MODELS_DIR, experiment_name)
     
     if model_names is None:
@@ -50,7 +51,7 @@ def plot_experiment_metrics(experiment_name, model_names=None):
     fig.tight_layout()
 
     for i, model in enumerate(model_names):
-        json_metric = os.path.join(experiment_dir, model, 'test_metrics.json')
+        json_metric = os.path.join(experiment_dir, model, '{}_metrics.json'.format(split))
         if os.path.exists(json_metric):
             with open(json_metric) as f:
                 metric_dict = json.load(f)
@@ -66,7 +67,8 @@ def plot_experiment_metrics(experiment_name, model_names=None):
     plt.legend(loc='lower right')
     return fig
 
-def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='coolwarm'):
+def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='coolwarm',\
+                           verbose=True, max_len=1000):
         
     experiment_dir = os.path.join(MODELS_DIR, experiment_name)
     
@@ -93,7 +95,8 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='
             continue
         
         n_epochs = len(hist['duration'])
-        print("Model {} has completed {} epochs".format(model, n_epochs))
+        if verbose:
+            print("Model {} has completed {} epochs".format(model, n_epochs))
         for j, (key, vals) in enumerate(hist.items()):
             sub_vals = vals[offset:] #subset to plot
             epochs = np.linspace(offset, len(vals)-1, len(sub_vals))
@@ -101,8 +104,7 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='
             axs[j].set_title(key)
             #if seq_len>axs_lengths[j]:
             #    axs_lengths[j] = seq_len
-    
-    max_len = 1000
+
     for i in range(7):          
         axs[i].set_xlim([offset, max_len])
             
@@ -110,7 +112,7 @@ def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='
     return fig
     
 def generate_confusion_plot(experiment_name, model_name, dataloader=None, split='test', savepath=None, bins=50, figside=8,\
-                            bounds=[1,5], log=False, verbose=True):
+                            bounds=None, log=False, verbose=True, target='vol', logscale=True):
     model_hist, model_spec, model_state = get_model_hist_spec_state(model_name, experiment_name)
     
     if dataloader is None:
@@ -120,7 +122,7 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
 
         if verbose:
             print("Building {} dataloader from {}...".format(split, model_spec['data_path']))
-        dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']==split], log=log)
+        dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']==split], log=log, target=target)
         
     features, labels = next(iter(dataloader))
     input_height = features.size()[2]
@@ -139,7 +141,7 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
         
     truth_list = []
     pred_list = []
-    for (x, y) in dataloader:
+    for (x, y) in tqdm(dataloader):
         (x, y) = (x.to(device), y.to(device))
         pred = model(x)
         
@@ -148,8 +150,12 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
             true = y.item()
             pred = pred.item()
         else:
-            true = np.log10(y.item())
-            pred = np.log10(pred.item())
+            if logscale:
+                true = np.log10(y.item())
+                pred = np.log10(pred.item())
+            else:
+                true = y.item()
+                pred = pred.item()
                 
         truth_list.append(true)
         pred_list.append(pred)
@@ -159,8 +165,13 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
     
     
     fig = plt.figure(figsize=(figside,figside))
-    bounds_pair = [bounds, bounds]
+    if bounds is None:
+        if target == 'vol':
+            bounds = [1,5]
+        elif target == 'rt60':
+            bounds = [-.5,1.5]
     
+    bounds_pair = [bounds, bounds]    
     # definitions for the axes
     left, width = 0.1, 0.65
     bottom, height = 0.1, 0.65
@@ -187,7 +198,8 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
     
     axHistx.set_xlim(bounds)
     axHisty.set_ylim(bounds)
-
+    
+    print("Plotting...")
     _, xedge, yedge, _ = axScatter.hist2d(truth_list, pred_list, bins=bins, range=bounds_pair)
     axScatter.plot(bounds, bounds, 'r--')
 
@@ -196,6 +208,7 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
     
     
     if savepath is not None:
+        print("Saving fig to {}".format(savepath))
         plt.savefig(savepath)
     
     return fig
@@ -224,17 +237,23 @@ def MeanAbsLogStep(output, target, log=True):
     loss = torch.mean(torch.abs(torch.log(torch.abs(vol_pred/vol_target))))
     return loss
 
-def compute_eval_metrics(dataloader, model, log=True):
+def compute_eval_metrics(dataloader, model, log=True, verbose=False):
     target_sum = 0
     pred_sum = 0
     n_steps = 0
-    
-    for (x,y) in dataloader:        
+    if verbose:
+        print("Computing sums...")
+        dataloader_iter = tqdm(dataloader)
+    else:
+        dataloader_iter = dataloader
+    for (x,y) in dataloader_iter:        
         (x, y) = (x.to(device), y.to(device))
-        pred = model(x)
-        target_sum += y.sum()
-        pred_sum += pred.sum()
+        y = y.item()
+        pred = model(x).item()
+        target_sum += np.sum(y)
+        pred_sum += np.sum(pred)
         n_steps += 1
+        del x, y
     
     torch.cuda.empty_cache()
 
@@ -249,7 +268,12 @@ def compute_eval_metrics(dataloader, model, log=True):
     var_pred = 0 #technically var * N but gets cancelled out in Pearson calculation
     var_target = 0 
     
-    for (x,y) in tqdm(dataloader):        
+    if verbose:
+        print("Computing metrics...")
+        dataloader_iter = tqdm(dataloader)
+    else:
+        dataloader_iter = dataloader
+    for (x,y) in dataloader_iter:          
         (x, y) = (x.to(device), y.to(device))
         pred = model(x)
         mse += MSE(pred, y).item()
@@ -258,7 +282,8 @@ def compute_eval_metrics(dataloader, model, log=True):
         abs_log_ratio += MeanAbsLogStep(pred, y, log=log).item()
         
         var_pred += MSE(pred, pred_mean).item()
-        var_target += MSE(y, target_mean).item()   
+        var_target += MSE(y, target_mean).item()
+        del x, y
         
     out_dict = {}
     out_dict['mse'] = (mse / n_steps)
@@ -268,3 +293,80 @@ def compute_eval_metrics(dataloader, model, log=True):
     out_dict['var_ratio'] = (np.sqrt(var_pred) / np.sqrt(var_target))
     
     return out_dict
+
+def evaluate_experiment(experiment_name, model_list=None, log=False, same_features=True, gen_plots=False, target='val'):
+    
+    if model_list is None:
+        model_list = os.listdir(os.path.join(MODELS_DIR, experiment_name))
+        model_list.sort()
+    
+    if same_features:
+        _, model_spec, _ = get_model_hist_spec_state(model_list[0], experiment_name)
+        feature_df = pd.read_csv(model_spec['data_path'])
+        test_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
+
+        features, labels = next(iter(test_dataloader))
+        input_height = features.size()[2]
+        input_width = features.size()[3]
+
+        model = model_funcs.Baseline_Model((input_height, input_width)).to(device)
+    
+    for model_name in model_list:
+        print("Loading {}".format(model_name))
+        _, model_spec, model_state = get_model_hist_spec_state(model_name, experiment_name)
+        
+        if not same_features:
+            print("Loading features from {}".format(model_spec['data_path']))
+            feature_df = pd.read_csv(model_spec['data_path'])
+            test_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
+            features, labels = next(iter(test_dataloader))
+            print('labels')
+            input_height = features.size()[2]
+            input_width = features.size()[3]
+            model = model_funcs.Baseline_Model((input_height, input_width)).to(device)
+        
+        if os.path.exists(model_state):
+            model.load_state_dict(torch.load(model_state, map_location=device))
+        else:
+            print("No weights found for {}".format(model_name))
+            continue
+        
+        print("Computing metrics on {}".format(model_name))
+        
+        print("Loading test dataloader...")
+        test_metrics = compute_eval_metrics(test_dataloader, model, log=log)
+        test_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'test_metrics.json')
+        print('Saving metrics to {}'.format(test_path))
+        with open(test_path, 'w') as f:
+            json.dump(test_metrics, f)
+        
+        print("Loading val dataloader...")
+        val_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='val'], log=log, target=target)
+        val_metrics = compute_eval_metrics(val_dataloader, model, log=log)
+        val_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'val_metrics.json')
+        print('Saving metrics to {}'.format(test_path))
+        with open(val_path, 'w') as f:
+            json.dump(val_metrics, f)   
+        
+        print("Loading train dataloader...")
+        train_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='train'], log=log, target=target)
+        train_metrics = compute_eval_metrics(train_dataloader, model, log=log)
+        train_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'train_metrics.json')
+        print('Saving metrics to {}'.format(train_path))
+        with open(train_path, 'w') as f:
+            json.dump(train_metrics, f)
+            
+        
+        if gen_plots:
+            print("Generating confusion matrices...")
+            model_fig_path = os.path.join(FIG_PATH, experiment_name, model_name)
+            if not os.path.exists(model_fig_path):
+                os.makedirs(model_fig_path)
+            _ = generate_confusion_plot(experiment_name, model_name, split='test', log=log, target=target,\
+                                        verbose=False, savepath=os.path.join(model_fig_path, 'test_cm.pdf'))
+            _ = generate_confusion_plot(experiment_name, model_name, split='val', log=log, target=target,\
+                                        verbose=False, savepath=os.path.join(model_fig_path, 'val_cm.pdf'))
+            _ = generate_confusion_plot(experiment_name, model_name, split='train', log=log,target=target,\
+                                        verbose=False, savepath=os.path.join(model_fig_path, 'train_cm.pdf'))
+
+    return None

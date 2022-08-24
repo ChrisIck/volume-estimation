@@ -23,7 +23,7 @@ print()
 torch.set_default_dtype(torch.float64)
 
 #dataloader generator
-def create_dataloader(feature_df, batch_size=1, log=True):
+def create_dataloader(feature_df, batch_size=1, log=True, target='vol'):
     dataset = []
     for row in feature_df.iterrows():
         feat_file = row[1]['file_feature']
@@ -32,17 +32,17 @@ def create_dataloader(feature_df, batch_size=1, log=True):
         feature = loaded['feat']
         feature = feature.reshape((1, feature.shape[0], feature.shape[1]))
         feature = np.real(feature)
-
-        vol = loaded['vol']
+        
+        val = loaded[target]
         if log:
-            vol = np.log10(vol)
-        dataset.append((feature, vol))
+            val = np.log10(val)
+        dataset.append((feature, val))
     
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
     return dataloader
 
 #training loop
-def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3, overwrite=False,
+def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-3, l2_reg=1e-3, overwrite=False,
                 epochs=1000, log=True, sched_thres=1e-4):
 
     model_path = model_dict['model_path']
@@ -65,18 +65,15 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3
     test_df = feat_df[feat_df['split']=='test']
     
     print("Creating training dataloader")
-    train_dataloader = create_dataloader(train_df, batch_size=batch_size, log=log)
+    train_dataloader = create_dataloader(train_df, batch_size=batch_size, log=log, target=target)
 
     print("Creating validation dataloader")
-    val_dataloader = create_dataloader(val_df, log=log)
+    val_dataloader = create_dataloader(val_df, log=log, target=target)
 
     print("Creating test dataloader")
-    test_dataloader = create_dataloader(test_df, log=log)
+    test_dataloader = create_dataloader(test_df, log=log, target=target)
     
     del feat_df
-    del train_df
-    del val_df
-    del test_df
     
     features, labels = next(iter(train_dataloader))
     print(f"Feature batch shape: {features.size()}")
@@ -157,9 +154,17 @@ def train_model(model_func, model_dict, batch_size=16, lr_init=1e-3, l2_reg=1e-3
             json.dump(hist, f)
             
     torch.cuda.empty_cache()
-    print("Training complete, computing evaluation on test set")
+    print("Training complete, computing evaluation on datasets")
     test_metrics = eval_funcs.compute_eval_metrics(test_dataloader, model, log=log)
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
+        json.dump(test_metrics, f)
+    val_metrics = eval_funcs.compute_eval_metrics(val_dataloader, model, log=log)
+    with open(os.path.join(model_path, 'val_metrics.json'), 'w') as f:
+        json.dump(test_metrics, f)
+        
+    train_dataloader = create_dataloader(train_df, batch_size=1, log=log, target=target)
+    train_metrics = eval_funcs.compute_eval_metrics(train_dataloader, model, log=log)
+    with open(os.path.join(model_path, 'train_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
     
     

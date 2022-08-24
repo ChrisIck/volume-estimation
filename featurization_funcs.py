@@ -307,6 +307,7 @@ def process_features(pairs_df, featurizer, output_dir, sr=16000, verbose=False,\
                      return_features=False, eval_rooms=['air_office','ace_leture_Room_1']):
     features = []
     volumes = []
+    rt60s = []
     
     featurizer_path = os.path.join(output_dir, 'featurizer.pickle')
     
@@ -324,7 +325,7 @@ def process_features(pairs_df, featurizer, output_dir, sr=16000, verbose=False,\
         feature = featurizer.process(audio)
         
         filename = os.path.join(output_dir, label + '.npz')
-        np.savez(filename, feat=feature, vol=row_tup['vol'])
+        np.savez(filename, feat=feature, vol=row_tup['vol'], rt60=row_tup['rt60'])
         feat_files.append(filename)
         if verbose:
             print("Saved feature to {}".format(filename))
@@ -332,6 +333,7 @@ def process_features(pairs_df, featurizer, output_dir, sr=16000, verbose=False,\
         if return_features:
             features.append(feature)
             volumes.append(row_tup['vol'])
+            rt60s.append(row_tup['rt60'])
     
     feat_df = pairs_df.copy()
     feat_df['file_feature'] = feat_files
