@@ -1,9 +1,8 @@
 import os
 import json
 import sys
-sys.path.append("/home/ci411/volume_estimation/")
 
-import model_funcs
+from volume_estimation import modeling
 import torch
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -122,7 +121,7 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
 
         if verbose:
             print("Building {} dataloader from {}...".format(split, model_spec['data_path']))
-        dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']==split], log=log, target=target)
+        dataloader = modeling.create_dataloader(feature_df[feature_df['split']==split], log=log, target=target)
         
     features, labels = next(iter(dataloader))
     input_height = features.size()[2]
@@ -130,7 +129,7 @@ def generate_confusion_plot(experiment_name, model_name, dataloader=None, split=
     
     if verbose:
         print("Loading model weights from {}...".format(model_state))
-    model = model_funcs.Baseline_Model((input_height, input_width)).to(device)
+    model = modeling.Baseline_Model((input_height, input_width)).to(device)
     model.load_state_dict(torch.load(model_state, map_location=device))
 
     
@@ -303,13 +302,13 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
     if same_features:
         _, model_spec, _ = get_model_hist_spec_state(model_list[0], experiment_name)
         feature_df = pd.read_csv(model_spec['data_path'])
-        test_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
+        test_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
 
         features, labels = next(iter(test_dataloader))
         input_height = features.size()[2]
         input_width = features.size()[3]
 
-        model = model_funcs.Baseline_Model((input_height, input_width)).to(device)
+        model = modeling.Baseline_Model((input_height, input_width)).to(device)
     
     for model_name in model_list:
         print("Loading {}".format(model_name))
@@ -318,12 +317,12 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
         if not same_features:
             print("Loading features from {}".format(model_spec['data_path']))
             feature_df = pd.read_csv(model_spec['data_path'])
-            test_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
+            test_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='test'], log=log, target=target)
             features, labels = next(iter(test_dataloader))
             print('labels')
             input_height = features.size()[2]
             input_width = features.size()[3]
-            model = model_funcs.Baseline_Model((input_height, input_width)).to(device)
+            model = modeling.Baseline_Model((input_height, input_width)).to(device)
         
         if os.path.exists(model_state):
             model.load_state_dict(torch.load(model_state, map_location=device))
@@ -341,7 +340,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
             json.dump(test_metrics, f)
         
         print("Loading val dataloader...")
-        val_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='val'], log=log, target=target)
+        val_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='val'], log=log, target=target)
         val_metrics = compute_eval_metrics(val_dataloader, model, log=log)
         val_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'val_metrics.json')
         print('Saving metrics to {}'.format(test_path))
@@ -349,7 +348,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
             json.dump(val_metrics, f)   
         
         print("Loading train dataloader...")
-        train_dataloader = model_funcs.create_dataloader(feature_df[feature_df['split']=='train'], log=log, target=target)
+        train_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='train'], log=log, target=target)
         train_metrics = compute_eval_metrics(train_dataloader, model, log=log)
         train_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'train_metrics.json')
         print('Saving metrics to {}'.format(train_path))

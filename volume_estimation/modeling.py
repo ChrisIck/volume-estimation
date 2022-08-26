@@ -9,10 +9,8 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from time import time
 
-import sys
-sys.path.append("/home/ci411/volume_estimation/")
 
-import eval_funcs
+from volume_estimation import evaluation
 
 from tqdm import tqdm
 
@@ -113,7 +111,7 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
         for (x, y) in train_dataloader:
             (x, y) = (x.to(device), y.to(device))
             pred = model(x)
-            loss = eval_funcs.MSE(pred, y.reshape((y.shape[0], 1)))
+            loss = evaluation.MSE(pred, y.reshape((y.shape[0], 1)))
 
             opt.zero_grad()
             loss.backward()
@@ -125,7 +123,7 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
         with torch.no_grad():
             model.eval()
 
-            val_metrics = eval_funcs.compute_eval_metrics(val_dataloader, model, log=log)
+            val_metrics = evaluation.compute_eval_metrics(val_dataloader, model, log=log)
         
         
         #update LR scheduler
@@ -155,15 +153,15 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
             
     torch.cuda.empty_cache()
     print("Training complete, computing evaluation on datasets")
-    test_metrics = eval_funcs.compute_eval_metrics(test_dataloader, model, log=log)
+    test_metrics = evaluation.compute_eval_metrics(test_dataloader, model, log=log)
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
-    val_metrics = eval_funcs.compute_eval_metrics(val_dataloader, model, log=log)
+    val_metrics = evaluation.compute_eval_metrics(val_dataloader, model, log=log)
     with open(os.path.join(model_path, 'val_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
         
     train_dataloader = create_dataloader(train_df, batch_size=1, log=log, target=target)
-    train_metrics = eval_funcs.compute_eval_metrics(train_dataloader, model, log=log)
+    train_metrics = evaluation.compute_eval_metrics(train_dataloader, model, log=log)
     with open(os.path.join(model_path, 'train_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
     
@@ -171,11 +169,11 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
     model_name = model_dict['model_path'].split('/')[-1]
     experiment_name = model_dict['model_path'].split('/')[-2]
     print("Generating confusion matrices...")
-    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=test_dataloader, log=log,\
+    _ = evaluation.generate_confusion_plot(experiment_name, model_name, dataloader=test_dataloader, log=log,\
                                            verbose=False, savepath=os.path.join(model_dict['model_path'], 'test_cm.pdf'))
-    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=val_dataloader, log=log,\
+    _ = evaluation.generate_confusion_plot(experiment_name, model_name, dataloader=val_dataloader, log=log,\
                                            verbose=False, savepath=os.path.join(model_dict['model_path'], 'val_cm.pdf'))
-    _ = eval_funcs.generate_confusion_plot(experiment_name, model_name, dataloader=train_dataloader, log=log,\
+    _ = evaluation.generate_confusion_plot(experiment_name, model_name, dataloader=train_dataloader, log=log,\
                                            verbose=False, savepath=os.path.join(model_dict['model_path'], 'train_cm.pdf'))
                 
 
