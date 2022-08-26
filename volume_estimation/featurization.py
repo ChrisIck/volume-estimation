@@ -66,6 +66,7 @@ class featurizer_block(_featurizer):
     
 from gammatone import gtgram, filters
 
+#outmoded by gammatone_featurizer
 class gammatone_feat(_featurizer):
     def __init__(self, input_len, sr=16000, low_freq=50, high_freq=2000, num_freq=20,
                  window_s=64, hop_s=32):
@@ -295,9 +296,11 @@ def generate_rir_audio(n_samples, speech_df, rir_df, len_clip=4, sr=22050, retur
             output_df_list.append(out_row)
  
     out_df = pd.DataFrame(output_df_list).reset_index().drop(columns=['index'])
-    df_path = os.path.join(out_path,'audio_df.csv')
-    out_df.to_csv(df_path, index=False)
-    print("Results stored to {}".format(df_path))
+    
+    if out_path is not None:
+        df_path = os.path.join(out_path,'audio_df.csv')
+        out_df.to_csv(df_path, index=False)
+        print("Results stored to {}".format(df_path))
     if return_audio:
         return out_df, audio_clips
     else:

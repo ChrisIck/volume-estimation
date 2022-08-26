@@ -1,0 +1,1 @@
+{"name": "prop5_20k_081622", "notes": "Model proposition 5, baseline + cont, mag + mag-feats + cont", "data_path": "/scratch/ci411/sonos_rirs/features/081522_20k/081522_20k_prop5/feature_df.csv", "model_path": "/scratch/ci411/sonos_rirs/models/20k_comp_models/prop5_20k_081622"}

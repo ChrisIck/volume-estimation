@@ -16,13 +16,13 @@ from matplotlib import cm
 from tqdm import tqdm
 
 
-MODELS_DIR = '/scratch/ci411/sonos_rirs/models/'
-FIG_PATH = '/home/ci411/volume_estimation/figures/'
+MODELS_DEFAULT = '/scratch/ci411/sonos_rirs/models/'
+FIG_DEFAULT = '/home/ci411/volume_estimation/figures/'
 
-def get_model_hist_spec_state(model_name, experiment_name):
-    hist_dir = os.path.join(MODELS_DIR, experiment_name, model_name, 'hist.json')
-    json_spec = os.path.join(MODELS_DIR, experiment_name, model_name, model_name+'_spec.json')
-    model_state = os.path.join(MODELS_DIR, experiment_name, model_name, 'model_state.pt')
+def get_model_hist_spec_state(model_name, experiment_name, models_dir=MODELS_DEFAULT):
+    hist_dir = os.path.join(models_dir, experiment_name, model_name, 'hist.json')
+    json_spec = os.path.join(models_dir, experiment_name, model_name, model_name+'_spec.json')
+    model_state = os.path.join(models_dir, experiment_name, model_name, 'model_state.pt')
     
     if os.path.exists(hist_dir):
         with open(hist_dir) as f:
@@ -36,8 +36,8 @@ def get_model_hist_spec_state(model_name, experiment_name):
         
     return hist, spec, model_state
 
-def plot_experiment_metrics(experiment_name, model_names=None, split='test'):
-    experiment_dir = os.path.join(MODELS_DIR, experiment_name)
+def plot_experiment_metrics(experiment_name, model_names=None, split='test',models_dir=MODELS_DEFAULT):
+    experiment_dir = os.path.join(models_dir, experiment_name)
     
     if model_names is None:
         model_names = os.listdir(experiment_dir)
@@ -67,9 +67,9 @@ def plot_experiment_metrics(experiment_name, model_names=None, split='test'):
     return fig
 
 def plot_experiment_curves(experiment_name, model_names=None, offset=100, cmap='coolwarm',\
-                           verbose=True, max_len=1000):
+                           verbose=True, max_len=1000, models_dir=MODELS_DEFAULT):
         
-    experiment_dir = os.path.join(MODELS_DIR, experiment_name)
+    experiment_dir = os.path.join(models_dir, experiment_name)
     
     if model_names is None:
         model_names = os.listdir(experiment_dir)
@@ -293,10 +293,11 @@ def compute_eval_metrics(dataloader, model, log=True, verbose=False):
     
     return out_dict
 
-def evaluate_experiment(experiment_name, model_list=None, log=False, same_features=True, gen_plots=False, target='val'):
+def evaluate_experiment(experiment_name, model_list=None, log=False, same_features=True,\
+                        gen_plots=False, target='val', models_dir=MODELS_DEFAULT, fig_path=FIG_DEFAULT):
     
     if model_list is None:
-        model_list = os.listdir(os.path.join(MODELS_DIR, experiment_name))
+        model_list = os.listdir(os.path.join(models_dir, experiment_name))
         model_list.sort()
     
     if same_features:
@@ -334,7 +335,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
         
         print("Loading test dataloader...")
         test_metrics = compute_eval_metrics(test_dataloader, model, log=log)
-        test_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'test_metrics.json')
+        test_path = os.path.join(models_dir, experiment_name, model_name, 'test_metrics.json')
         print('Saving metrics to {}'.format(test_path))
         with open(test_path, 'w') as f:
             json.dump(test_metrics, f)
@@ -342,7 +343,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
         print("Loading val dataloader...")
         val_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='val'], log=log, target=target)
         val_metrics = compute_eval_metrics(val_dataloader, model, log=log)
-        val_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'val_metrics.json')
+        val_path = os.path.join(models_dir, experiment_name, model_name, 'val_metrics.json')
         print('Saving metrics to {}'.format(test_path))
         with open(val_path, 'w') as f:
             json.dump(val_metrics, f)   
@@ -350,7 +351,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
         print("Loading train dataloader...")
         train_dataloader = modeling.create_dataloader(feature_df[feature_df['split']=='train'], log=log, target=target)
         train_metrics = compute_eval_metrics(train_dataloader, model, log=log)
-        train_path = os.path.join(MODELS_DIR, experiment_name, model_name, 'train_metrics.json')
+        train_path = os.path.join(models_dir, experiment_name, model_name, 'train_metrics.json')
         print('Saving metrics to {}'.format(train_path))
         with open(train_path, 'w') as f:
             json.dump(train_metrics, f)
@@ -358,7 +359,7 @@ def evaluate_experiment(experiment_name, model_list=None, log=False, same_featur
         
         if gen_plots:
             print("Generating confusion matrices...")
-            model_fig_path = os.path.join(FIG_PATH, experiment_name, model_name)
+            model_fig_path = os.path.join(fig_path, experiment_name, model_name)
             if not os.path.exists(model_fig_path):
                 os.makedirs(model_fig_path)
             _ = generate_confusion_plot(experiment_name, model_name, split='test', log=log, target=target,\

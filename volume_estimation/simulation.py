@@ -8,6 +8,18 @@ def generate_room_dims(vol, var=.3):
     side3 = vol/(side1*side2)
     return np.array([side1, side2, side3])
 
+def generate_in_room(room_center, room_dims, loc_std, lim=100):
+    loc = np.random.multivariate_normal(room_center, np.identity(3)*loc_std)
+    count = 0
+    while np.any(loc>room_dims) or np.any(loc<0):
+        loc = np.random.multivariate_normal(room_center, np.identity(3)*loc_std)
+        count += 1
+        if count>lim:
+            print("Limit {} reached, returning room center")
+            loc = room_dims/2
+            break
+    return loc
+
 def generate_rirs(room_dims, n_mics, materials, sr=44100, max_order=10, loc_std=None):
     room_center = room_dims/2
     if loc_std is None:
@@ -35,16 +47,3 @@ def generate_rirs(room_dims, n_mics, materials, sr=44100, max_order=10, loc_std=
     for i in range(n_mics):
         rirs_out.append(room.rir[i][0])
     return rirs_out
-
-def generate_in_room(room_center, room_dims, loc_std, lim=100):
-    loc = np.random.multivariate_normal(room_center, np.identity(3)*loc_std)
-    count = 0
-    while np.any(loc>room_dims) or np.any(loc<0):
-        loc = np.random.multivariate_normal(room_center, np.identity(3)*loc_std)
-        count += 1
-        if count>lim:
-            print("Limit {} reached, returning room center")
-            loc = room_dims/2
-            break
-    return loc
-
