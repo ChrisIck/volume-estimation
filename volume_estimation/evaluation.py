@@ -293,8 +293,8 @@ def compute_eval_metrics(dataloader, model, log=True, verbose=False):
     
     return out_dict
 
-def evaluate_experiment(experiment_name, model_list=None, log=False, same_features=True,\
-                        gen_plots=False, target='val', models_dir=MODELS_DEFAULT, fig_path=FIG_DEFAULT):
+def evaluate_experiment(experiment_name, model_list=None, log=True, same_features=False,\
+                        gen_plots=False, target='vol', models_dir=MODELS_DEFAULT, fig_path=FIG_DEFAULT):
     
     if model_list is None:
         model_list = os.listdir(os.path.join(models_dir, experiment_name))

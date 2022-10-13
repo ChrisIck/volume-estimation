@@ -156,14 +156,15 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
     test_metrics = evaluation.compute_eval_metrics(test_dataloader, model, log=log)
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(test_metrics, f)
+        
     val_metrics = evaluation.compute_eval_metrics(val_dataloader, model, log=log)
     with open(os.path.join(model_path, 'val_metrics.json'), 'w') as f:
-        json.dump(test_metrics, f)
+        json.dump(val_metrics, f)
         
     train_dataloader = create_dataloader(train_df, batch_size=1, log=log, target=target)
     train_metrics = evaluation.compute_eval_metrics(train_dataloader, model, log=log)
     with open(os.path.join(model_path, 'train_metrics.json'), 'w') as f:
-        json.dump(test_metrics, f)
+        json.dump(train_metrics, f)
     
     
     model_name = model_dict['model_path'].split('/')[-1]
