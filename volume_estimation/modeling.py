@@ -21,7 +21,7 @@ print()
 torch.set_default_dtype(torch.float64)
 
 #dataloader generator
-def create_dataloader(feature_df, batch_size=1, log=True, target='vol'):
+def create_dataloader(feature_df, batch_size=1, targets=['vol']):
     dataset = []
     for row in feature_df.iterrows():
         feat_file = row[1]['file_feature']
@@ -31,17 +31,18 @@ def create_dataloader(feature_df, batch_size=1, log=True, target='vol'):
         feature = feature.reshape((1, feature.shape[0], feature.shape[1]))
         feature = np.real(feature)
         
-        val = loaded[target]
-        if log:
-            val = np.log10(val)
-        dataset.append((feature, val))
+        outputs = np.empty(len(targets))
+        for i, target in enumerate(targets):
+            val = row[1][target]
+            outputs[i] = val
+        dataset.append((feature, outputs))
     
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
     return dataloader
 
 #training loop
-def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-3, l2_reg=1e-3, overwrite=False,
-                epochs=1000, log=True, sched_thres=1e-4):
+def train_model(model_func, model_dict, targets=['vol'], batch_size=16, lr_init=1e-3, l2_reg=1e-3, overwrite=False,
+                epochs=1000, log=True, sched_thres=1e-4, normalize_targets=False):
 
     model_path = model_dict['model_path']
     if not os.path.exists(model_path):
@@ -58,18 +59,30 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
     
     print("\nLoading data from ", model_dict['data_path'])
     feat_df = pd.read_csv(model_dict['data_path'])
+    
+    print("Dataset size: {}".format(feat_df.shape))
+    
+    if log:
+        for target in targets:
+            feat_df[target] = np.log10(feat_df[target])
+            
+    if normalize_targets:
+        for target in targets:
+            feat_df[target] = feat_df[target]/feat_df[target].max()
+            
+    
     train_df = feat_df[feat_df['split']=='train']
     val_df = feat_df[feat_df['split']=='val']
     test_df = feat_df[feat_df['split']=='test']
     
     print("Creating training dataloader")
-    train_dataloader = create_dataloader(train_df, batch_size=batch_size, log=log, target=target)
+    train_dataloader = create_dataloader(train_df, batch_size=batch_size, targets=targets)
 
     print("Creating validation dataloader")
-    val_dataloader = create_dataloader(val_df, log=log, target=target)
+    val_dataloader = create_dataloader(val_df, targets=targets)
 
     print("Creating test dataloader")
-    test_dataloader = create_dataloader(test_df, log=log, target=target)
+    test_dataloader = create_dataloader(test_df, targets=targets)
     
     del feat_df
     
@@ -84,18 +97,21 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
     opt_state_path = os.path.join(model_path, 'opt_state.pt')
     hist_path = os.path.join(model_path,'hist.json')
     
-    model = model_func((input_height, input_width)).to(device)
+    n_out = len(targets)
+    model = model_func((input_height, input_width), n_out=n_out).to(device)
     opt = Adam(model.parameters(),lr=lr_init, weight_decay=l2_reg)
     scheduler = ReduceLROnPlateau(opt, 'min', threshold=sched_thres)
     hist = {
         "duration": [],
         "train_loss": [],
-        "val_loss": [],
-        "val_bias": [],
-        "val_pearson_cor": [],
-        "val_mean_mult": [],
-        "val_var_ratio": []
     }
+    
+    for target in targets:
+        hist['val_'+target+ "_loss"] = []
+        hist['val_'+target+ "_bias"] = []
+        hist['val_'+target+ "_pearson_cor"] = []
+        hist['val_'+target+ "_mean_mult"] = []
+        hist['val_'+target+ "_var_ratio"] = []
     
     lr = lr_init
     print("Beginning training for {} epochs...".format(epochs))
@@ -111,7 +127,7 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
         for (x, y) in train_dataloader:
             (x, y) = (x.to(device), y.to(device))
             pred = model(x)
-            loss = evaluation.MSE(pred, y.reshape((y.shape[0], 1)))
+            loss = evaluation.MSE(pred, y, is_loss=True)
 
             opt.zero_grad()
             loss.backward()
@@ -125,25 +141,26 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
 
             val_metrics = evaluation.compute_eval_metrics(val_dataloader, model, log=log)
         
-        
         #update LR scheduler
-        scheduler.step(val_metrics['mse'])
+        scheduler.step(np.sum(val_metrics['mse']))
         
         t_end = time()
         t_elapsed = t_end - t_start
         
         hist['duration'].append(t_elapsed)
         hist['train_loss'].append(train_loss.item()/train_steps)
-        hist['val_loss'].append(val_metrics['mse'])
-        hist['val_bias'].append(val_metrics['bias'])
-        hist['val_pearson_cor'].append(val_metrics['pearson_cor'])
-        hist['val_mean_mult'].append(val_metrics['mean_mult'])
-        hist['val_var_ratio'].append(val_metrics['var_ratio'])
+        for i, target in enumerate(targets):
+            hist['val_'+target + '_loss'].append(val_metrics['mse'][i])
+            hist['val_'+target + '_bias'].append(val_metrics['bias'][i])
+            hist['val_'+target + '_pearson_cor'].append(val_metrics['pearson_cor'][i])
+            hist['val_'+target + '_mean_mult'].append(val_metrics['mean_mult'][i])
+            hist['val_'+target + '_var_ratio'].append(val_metrics['var_ratio'][i])
 
         
-        print("Epoch: {}\tDuration: {:.2f}s\tTrain loss: {:.4f}\tVal loss: {:.4f}\tVal bias:{:.4f}\tVal Pearson correlation: {:.4e}\tVal MeanMult: {:.4f}"\
-              .format(ep, t_elapsed, train_loss/train_steps, val_metrics['mse'],\
-                      val_metrics['bias'], val_metrics['pearson_cor'],val_metrics['mean_mult']))
+        print("E: {}\tD: {:.2f}s\tTL: {}\tVL: {}\tVB:{}\tVP: {}\tVM: {}\tVV:{}"\
+              .format(ep, t_elapsed, (train_loss/train_steps).detach()[0], val_metrics['mse'],\
+                      val_metrics['bias'], val_metrics['pearson_cor'],\
+                      val_metrics['mean_mult'], val_metrics['var_ratio']))
         
         #save stuff
         torch.save(model.state_dict(), model_state_path)
@@ -161,7 +178,7 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
     with open(os.path.join(model_path, 'val_metrics.json'), 'w') as f:
         json.dump(val_metrics, f)
         
-    train_dataloader = create_dataloader(train_df, batch_size=1, log=log, target=target)
+    train_dataloader = create_dataloader(train_df, batch_size=1, target=target)
     train_metrics = evaluation.compute_eval_metrics(train_dataloader, model, log=log)
     with open(os.path.join(model_path, 'train_metrics.json'), 'w') as f:
         json.dump(train_metrics, f)
@@ -180,7 +197,7 @@ def train_model(model_func, model_dict, target='vol', batch_size=16, lr_init=1e-
 
 #model definitions
 class Baseline_Model(Module):
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, n_out=1):
         #accepts a tuple with the height/width of the feature
         #matrix to set the FC layer dimensions
         super(Baseline_Model, self).__init__()
@@ -222,7 +239,7 @@ class Baseline_Model(Module):
         time6 = (time5 - 7) // 2
 
         flat_dims = 5 * height6 * time6
-        fc_layer = Linear(flat_dims, 1)
+        fc_layer = Linear(flat_dims, n_out)
         
         self.net = Sequential(
                     Conv1, ReLU(), Avgpool1,
